@@ -477,7 +477,7 @@ API.deleteUser = function (p) {
 
 
 API.importRoster = function (p) {
-  var s = session_(p.token); need_(s, ['admin']);
+  var s = session_(p.token); need_(s, ['admin', 'teacher']);
   var rooms = p.rooms || [];
   if (!rooms.length) fail_('ไม่พบรายชื่อในไฟล์');
   return withLock_(function () {
@@ -519,6 +519,136 @@ API.importRoster = function (p) {
       st.getRange(2, 1, stuRows.length, 6).setValues(stuRows);
     }
     return { rooms: Object.keys(keep).length, students: stuRows.length, list: roomsWithStudents_() };
+  });
+};
+
+
+API.saveRoom = function (p) {
+  var s = session_(p.token); need_(s, ['admin', 'teacher']);
+  var code = String(p.code || '').trim().slice(0, 40);
+  var major = String(p.major || '').trim().slice(0, 80);
+  var level = String(p.level || '').trim().slice(0, 20);
+  var advisor = String(p.advisor || '').trim().slice(0, 120);
+  if (!code) fail_('กรุณากรอกรหัสห้องเรียน เช่น ชย.11');
+  return withLock_(function () {
+    var rows = readRows_('Rooms');
+    var dup = rows.filter(function (r) { return String(r.code).trim().toLowerCase() === code.toLowerCase() && String(r.rid).trim() !== String(p.rid || '').trim(); })[0];
+    if (dup) fail_('มีรหัสห้องเรียน "' + code + '" อยู่ในระบบแล้ว');
+    var sh = sheet_('Rooms');
+    var rid = String(p.rid || '').trim();
+    if (rid) {
+      var ex = rows.filter(function (r) { return String(r.rid).trim() === rid; })[0];
+      if (!ex) fail_('ไม่พบห้องเรียนนี้');
+      sh.getRange(ex._row, 2, 1, 4).setValues([[code, major, level, advisor]]);
+    } else {
+      var maxN = 0;
+      rows.forEach(function (r) {
+        var n = Number(String(r.rid).replace(/\D/g, '')) || 0;
+        if (n > maxN) maxN = n;
+      });
+      var nextN = maxN + 1;
+      rid = 'r' + (nextN < 10 ? '0' + nextN : String(nextN));
+      sh.appendRow([rid, code, major, level, advisor, rows.length + 1]);
+    }
+    return { rid: rid, list: roomsWithStudents_() };
+  });
+};
+
+
+API.deleteRoom = function (p) {
+  var s = session_(p.token); need_(s, ['admin', 'teacher']);
+  var rid = String(p.rid || '').trim();
+  if (!rid) fail_('ไม่พบรหัสห้องเรียน');
+  return withLock_(function () {
+    var rs = sheet_('Rooms');
+    var rm = readRows_('Rooms').filter(function (r) { return String(r.rid).trim() === rid; })[0];
+    if (!rm) fail_('ไม่พบห้องเรียนนี้');
+    rs.deleteRow(rm._row);
+    var st = sheet_('Students');
+    readRows_('Students').filter(function (x) { return String(x.rid).trim() === rid; })
+      .map(function (x) { return x._row; })
+      .sort(function (a, b) { return b - a; })
+      .forEach(function (r) { st.deleteRow(r); });
+    return { list: roomsWithStudents_() };
+  });
+};
+
+
+API.saveStudent = function (p) {
+  var s = session_(p.token); need_(s, ['admin', 'teacher']);
+  var origId = String(p.origId || '').trim();
+  var id = String(p.id || '').trim();
+  var first = String(p.first || '').trim().slice(0, 80);
+  var last = String(p.last || '').trim().slice(0, 80);
+  var rid = String(p.rid || '').trim();
+  if (!id || !first || !rid) fail_('กรุณากรอกรหัสนักศึกษา ชื่อ และห้องเรียนให้ครบ');
+  return withLock_(function () {
+    var rm = readRows_('Rooms').filter(function (r) { return String(r.rid).trim() === rid; })[0];
+    if (!rm) fail_('ไม่พบห้องเรียนที่เลือก');
+    var allStu = readRows_('Students');
+    var sh = sheet_('Students');
+    if (origId) {
+      var cur = allStu.filter(function (x) { return String(x.id).trim() === origId; })[0];
+      if (!cur) fail_('ไม่พบข้อมูลนักศึกษาเดิม');
+      if (id !== origId && allStu.some(function (x) { return String(x.id).trim() === id; })) {
+        fail_('รหัสนักศึกษา ' + id + ' มีอยู่ในระบบแล้ว');
+      }
+      sh.getRange(cur._row, 1).setNumberFormat('@');
+      sh.getRange(cur._row, 1, 1, 4).setValues([[id, first, last, rid]]);
+    } else {
+      if (allStu.some(function (x) { return String(x.id).trim() === id; })) {
+        fail_('รหัสนักศึกษา ' + id + ' มีอยู่ในระบบแล้ว');
+      }
+      sh.appendRow([id, first, last, rid, '', '']);
+      sh.getRange(sh.getLastRow(), 1).setNumberFormat('@');
+    }
+    return { list: roomsWithStudents_() };
+  });
+};
+
+
+API.bulkAddStudents = function (p) {
+  var s = session_(p.token); need_(s, ['admin', 'teacher']);
+  var rid = String(p.rid || '').trim();
+  var items = p.students || [];
+  if (!rid || !items.length) fail_('กรุณาระบุห้องเรียนและรายชื่อนักศึกษา');
+  return withLock_(function () {
+    var rm = readRows_('Rooms').filter(function (r) { return String(r.rid).trim() === rid; })[0];
+    if (!rm) fail_('ไม่พบห้องเรียนที่เลือก');
+    var allStu = readRows_('Students');
+    var byId = {};
+    allStu.forEach(function (x) { byId[String(x.id).trim()] = x; });
+    var sh = sheet_('Students');
+    var added = 0, updated = 0;
+    items.forEach(function (item) {
+      var id = String(item[0] || '').trim();
+      var first = String(item[1] || '').trim().slice(0, 80);
+      var last = String(item[2] || '').trim().slice(0, 80);
+      if (!id || !first) return;
+      if (byId[id]) {
+        sh.getRange(byId[id]._row, 2, 1, 3).setValues([[first, last, rid]]);
+        updated++;
+      } else {
+        sh.appendRow([id, first, last, rid, '', '']);
+        sh.getRange(sh.getLastRow(), 1).setNumberFormat('@');
+        byId[id] = { _row: sh.getLastRow(), id: id };
+        added++;
+      }
+    });
+    return { added: added, updated: updated, list: roomsWithStudents_() };
+  });
+};
+
+
+API.deleteStudent = function (p) {
+  var s = session_(p.token); need_(s, ['admin', 'teacher']);
+  var id = String(p.id || '').trim();
+  if (!id) fail_('ไม่พบรหัสนักศึกษา');
+  return withLock_(function () {
+    var st = readRows_('Students').filter(function (x) { return String(x.id).trim() === id; })[0];
+    if (!st) fail_('ไม่พบนักศึกษา');
+    sheet_('Students').deleteRow(st._row);
+    return { list: roomsWithStudents_() };
   });
 };
 

@@ -189,7 +189,7 @@ const newId=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const clone=o=>JSON.parse(JSON.stringify(o));
 function toast(m){const t=document.getElementById("toast");t.textContent=m;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>t.hidden=true,2600)}
 const sv=d=>`<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
-const ICON={home:sv('<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>'),att:sv('<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 12l3 3 5-6"/>'),work:sv('<path d="M7 3h8l4 4v14H7z"/><path d="M10 12h6M10 16h6"/>'),score:sv('<path d="M5 20V10M12 20V4M19 20v-7"/>'),tools:sv('<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>'),report:sv('<path d="M4 5h16v14H4z"/><path d="M4 10h16M10 10v9"/>'),add:sv('<path d="M12 5v14M5 12h14"/>'),search:sv('<circle cx="11" cy="11" r="6"/><path d="M16 16l4 4"/>')};
+const ICON={home:sv('<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>'),att:sv('<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 12l3 3 5-6"/>'),work:sv('<path d="M7 3h8l4 4v14H7z"/><path d="M10 12h6M10 16h6"/>'),score:sv('<path d="M5 20V10M12 20V4M19 20v-7"/>'),tools:sv('<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>'),report:sv('<path d="M4 5h16v14H4z"/><path d="M4 10h16M10 10v9"/>'),add:sv('<path d="M12 5v14M5 12h14"/>'),search:sv('<circle cx="11" cy="11" r="6"/><path d="M16 16l4 4"/>'),rooms:sv('<path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 11h2M13 11h2M9 15h2M13 15h2"/>')};
 const TABS=[["att","เช็กชื่อ"],["work","สั่งงาน ตรวจงาน"],["score","คะแนน"],["tools","เครื่องมือ"],["report","รายงาน"]];
 
 
@@ -418,8 +418,72 @@ function localApi(name,p){
     db.users=db.users.filter(x=>x.username!==u.username);
     save();return {};
   }
+  if(name==="saveRoom"){
+    const s=sess();need(s,["admin","teacher"]);
+    const code=String(p.code||"").trim().slice(0,40),major=String(p.major||"").trim().slice(0,80),level=String(p.level||"").trim().slice(0,20),advisor=String(p.advisor||"").trim().slice(0,120);
+    if(!code)fail("กรุณากรอกรหัสห้องเรียน เช่น ชย.11");
+    let rid=String(p.rid||"").trim();
+    if(db.rooms.some(r=>r.code.trim().toLowerCase()===code.toLowerCase()&&String(r.rid).trim()!==rid))fail(`มีรหัสห้องเรียน "${code}" อยู่ในระบบแล้ว`);
+    if(rid){
+      const ex=db.rooms.find(r=>String(r.rid).trim()===rid);
+      if(!ex)fail("ไม่พบห้องเรียนนี้");
+      Object.assign(ex,{code,major,level,advisor});
+    }else{
+      let maxN=0;db.rooms.forEach(r=>{const n=Number(String(r.rid).replace(/\D/g,""))||0;if(n>maxN)maxN=n});
+      const nextN=maxN+1;
+      rid="r"+(nextN<10?"0"+nextN:String(nextN));
+      db.rooms.push({rid,code,major,level,advisor,order:db.rooms.length+1});
+    }
+    save();return {rid,list:roomsWithStu()};
+  }
+  if(name==="deleteRoom"){
+    const s=sess();need(s,["admin","teacher"]);
+    const rid=String(p.rid||"").trim();
+    if(!rid)fail("ไม่พบรหัสห้องเรียน");
+    db.rooms=db.rooms.filter(r=>String(r.rid).trim()!==rid);
+    db.students=db.students.filter(x=>String(x.rid).trim()!==rid);
+    save();return {list:roomsWithStu()};
+  }
+  if(name==="saveStudent"){
+    const s=sess();need(s,["admin","teacher"]);
+    const origId=String(p.origId||"").trim(),id=String(p.id||"").trim(),first=String(p.first||"").trim().slice(0,80),last=String(p.last||"").trim().slice(0,80),rid=String(p.rid||"").trim();
+    if(!id||!first||!rid)fail("กรุณากรอกรหัสนักศึกษา ชื่อ และห้องเรียนให้ครบ");
+    if(!db.rooms.some(r=>String(r.rid).trim()===rid))fail("ไม่พบห้องเรียนที่เลือก");
+    if(origId){
+      const cur=db.students.find(x=>String(x.id).trim()===origId);
+      if(!cur)fail("ไม่พบข้อมูลนักศึกษาเดิม");
+      if(id!==origId&&db.students.some(x=>String(x.id).trim()===id))fail("รหัสนักศึกษา "+id+" มีอยู่ในระบบแล้ว");
+      Object.assign(cur,{id,first,last,rid});
+    }else{
+      if(db.students.some(x=>String(x.id).trim()===id))fail("รหัสนักศึกษา "+id+" มีอยู่ในระบบแล้ว");
+      db.students.push({id,first,last,rid,pass:""});
+    }
+    save();return {list:roomsWithStu()};
+  }
+  if(name==="bulkAddStudents"){
+    const s=sess();need(s,["admin","teacher"]);
+    const rid=String(p.rid||"").trim(),items=p.students||[];
+    if(!rid||!items.length)fail("กรุณาระบุห้องเรียนและรายชื่อนักศึกษา");
+    if(!db.rooms.some(r=>String(r.rid).trim()===rid))fail("ไม่พบห้องเรียนที่เลือก");
+    let added=0,updated=0;
+    items.forEach(item=>{
+      const id=String(item[0]||"").trim(),first=String(item[1]||"").trim().slice(0,80),last=String(item[2]||"").trim().slice(0,80);
+      if(!id||!first)return;
+      const ex=db.students.find(x=>String(x.id).trim()===id);
+      if(ex){Object.assign(ex,{first,last,rid});updated++}
+      else{db.students.push({id,first,last,rid,pass:""});added++}
+    });
+    save();return {added,updated,list:roomsWithStu()};
+  }
+  if(name==="deleteStudent"){
+    const s=sess();need(s,["admin","teacher"]);
+    const id=String(p.id||"").trim();
+    if(!id)fail("ไม่พบรหัสนักศึกษา");
+    db.students=db.students.filter(x=>String(x.id).trim()!==id);
+    save();return {list:roomsWithStu()};
+  }
   if(name==="importRoster"){
-    const s=sess();need(s,["admin"]);
+    const s=sess();need(s,["admin","teacher"]);
     const rooms=p.rooms||[];
     if(!rooms.length)fail("ไม่พบรายชื่อในไฟล์");
     const oldPw={};db.students.forEach(x=>oldPw[x.id]=x.pass||"");
@@ -481,7 +545,7 @@ function call(name,payload){
     .then(o=>new Promise((res,rej)=>handleApiResult(o,res,rej)))
     .catch(e=>Promise.reject({message:e&&e.message?e.message:"เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่"}));
 }
-function sessionExpired(){TOKEN=null;try{localStorage.removeItem("ca_token")}catch(e){}S.role=null;S.sid=null;S.form=null;S.search=false;S.ssid=null;S.cred=null}
+function sessionExpired(){TOKEN=null;try{localStorage.removeItem("ca_token")}catch(e){}S.role=null;S.sid=null;S.form=null;S.search=false;S.manage=false;S.mroom=null;S.editStu=null;S.ssid=null;S.cred=null}
 function dlBlob(filename,blob){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),10000)}
 const pend={},chain={};
 let inflight=0;
@@ -571,11 +635,12 @@ function render(){
   if(S.loading){v.innerHTML=`<div class="empty">กำลังโหลดข้อมูล…</div>`;return}
   if(S.role==="student"){renderStudent(v,side);return}
   if(S.role==="admin"){renderAdmin(v,side);return}
-  side.innerHTML=`<button id="nav-home" data-home="1" ${!sub&&!S.form&&!S.search?'aria-current="page"':""}>${ICON.home}<span class="tx">วิชาที่ฉันสอน</span></button><button id="nav-search" data-search="1" ${S.search?'aria-current="page"':""}>${ICON.search}<span class="tx">ค้นหานักเรียน</span></button>`+
+  side.innerHTML=`<button id="nav-home" data-home="1" ${!sub&&!S.form&&!S.search&&!S.manage?'aria-current="page"':""}>${ICON.home}<span class="tx">วิชาที่ฉันสอน</span></button><button id="nav-manage" data-manage="1" ${S.manage?'aria-current="page"':""}>${ICON.rooms}<span class="tx">จัดการห้อง / นักศึกษา</span></button><button id="nav-search" data-search="1" ${S.search?'aria-current="page"':""}>${ICON.search}<span class="tx">ค้นหานักเรียน</span></button>`+
    (sub?`<hr><div class="lbl">${esc(sub.name)}</div>`+TABS.map(([k,l])=>`<button id="tab-${k}" data-tab="${k}" ${S.tab===k&&!S.stu?'aria-current="page"':""}>${ICON[k]}<span class="tx">${l}</span></button>`).join("")
    :`<button id="nav-add" data-newsubj="1" ${S.form?'aria-current="page"':""}>${ICON.add}<span class="tx">เพิ่มรายวิชา</span></button>`+(S.subjects.length?`<div class="lbl">เลือกวิชา</div>`:"")+S.subjects.map(s=>`<button class="subjbtn" data-subj="${esc(s._id)}"><span class="dot" style="background:${esc(s.color)}"></span><span class="tx">${esc(s.name)}</span></button>`).join(""));
   if(S.err){v.innerHTML=`<div class="empty">${esc(S.err)}</div>`;return}
   if(S.form){v.innerHTML=formView();fillRooms();return}
+  if(S.manage){v.innerHTML=manageView();return}
   if(S.search){v.innerHTML=searchView();if(!S.gstu)fillResults();return}
   if(!sub){v.innerHTML=home();return}
   v.innerHTML=subjHead(sub)+(S.subLoading?`<div class="empty">กำลังโหลดข้อมูลรายวิชา…</div>`:S.stu?stuView(sub):VIEW[S.tab](sub));
@@ -602,7 +667,7 @@ function fillRooms(){const f=S.form,sel=document.getElementById("room-sel"),res=
   const q=(document.getElementById("rq").value||"").trim().toLowerCase();if(!q){res.innerHTML="";return}
   const hit=S.rooms.filter(r=>!f.rooms.includes(r._id)&&(r.code+" "+r.major+" "+r.level+" "+r.advisor).toLowerCase().includes(q)).slice(0,12);
   res.innerHTML=hit.length?hit.map(r=>`<button type="button" class="item" data-addroom="${esc(r._id)}"><span class="t"><b>${esc(r.code)}</b> <span class="note">${esc(r.level)} · ${esc(r.major)} · ${r.students.length} คน</span></span><span class="note">+ เพิ่มห้องนี้</span></button>`).join(""):`<p class="note">ไม่พบห้องที่ตรงกับคำค้น หรือเลือกไปแล้ว</p>`}
-function subjHead(sub){return `<div class="bar"><div style="display:grid;gap:4px;min-width:0"><button class="link" id="back" style="justify-self:start">← วิชาทั้งหมด</button><h1>${esc(sub.name)}</h1><p class="note">${[sub.code,sub.sched,STU.length+" คน"].filter(Boolean).map(esc).join(" · ")} · <button class="link" id="subj-edit">แก้ไขรายวิชา</button></p></div>${S.stu||S.tab==="tools"||(S.tab==="work"&&!S.task)?"":searchBox()}${sub.rooms.length>1&&S.tab!=="tools"&&!S.stu?`<div class="seg rooms" role="group" aria-label="เลือกห้อง">${["all",...sub.rooms].map(r=>`<button data-room="${esc(r)}" aria-pressed="${S.room===r}">${r==="all"?"ทุกห้อง":esc(roomById(r)?.code)}</button>`).join("")}</div>`:""}</div>`}
+function subjHead(sub){return `<div class="bar"><div style="display:grid;gap:4px;min-width:0"><button class="link" id="back" style="justify-self:start">← วิชาทั้งหมด</button><h1>${esc(sub.name)}</h1><p class="note">${[sub.code,sub.sched,STU.length+" คน"].filter(Boolean).map(esc).join(" · ")} · <button class="link" id="subj-edit">แก้ไขรายวิชา</button> · <button class="link" data-mroom="${esc(S.room!=='all'?S.room:(sub.rooms[0]||''))}">จัดการห้อง/เพิ่ม-ลบนักศึกษา</button></p></div>${S.stu||S.tab==="tools"||(S.tab==="work"&&!S.task)?"":searchBox()}${sub.rooms.length>1&&S.tab!=="tools"&&!S.stu?`<div class="seg rooms" role="group" aria-label="เลือกห้อง">${["all",...sub.rooms].map(r=>`<button data-room="${esc(r)}" aria-pressed="${S.room===r}">${r==="all"?"ทุกห้อง":esc(roomById(r)?.code)}</button>`).join("")}</div>`:""}</div>`}
 
 
 const VIEW={
@@ -659,7 +724,7 @@ function searchView(){
   if(S.gstu){const [rid,id]=S.gstu;const r=roomById(rid),st=r&&r.students.find(x=>x[0]===id);if(st){const mine=S.subjects.filter(x=>x.rooms.includes(rid));
    return `<div style="display:grid;gap:4px"><button class="link" id="gstu-back" style="justify-self:start">← กลับไปผลการค้นหา</button><h1>${esc(st[1]+" "+st[2])}</h1></div>
    <div class="card"><dl class="kv"><dt>รหัสประจำตัว</dt><dd>${esc(id)}</dd><dt>ห้อง</dt><dd>${esc(r.code)}</dd><dt>ระดับชั้น</dt><dd>${esc(r.level)}</dd><dt>สาขาวิชา</dt><dd>${esc(r.major)}</dd><dt>ครูที่ปรึกษา</dt><dd>${esc(r.advisor)||"-"}</dd><dt>จำนวนนักเรียนในห้อง</dt><dd>${r.students.length} คน</dd></dl></div>
-   <div class="bar acts"><button class="btn" id="stu-reset" data-id="${esc(id)}">${S.confirm==="sr"?"กดอีกครั้งเพื่อยืนยันการรีเซ็ต":"รีเซ็ตรหัสผ่านนักศึกษา"}</button><span class="note">ใช้เมื่อนักศึกษาลืมรหัสผ่าน หลังรีเซ็ตจะเข้าด้วยรหัสนักศึกษาได้อีกครั้ง</span></div>
+   <div class="bar acts"><button class="btn primary" data-mstu-edit="${esc(id)}" data-rid="${esc(rid)}">แก้ไขข้อมูล / ย้ายห้อง</button><button class="btn" id="stu-reset" data-id="${esc(id)}">${S.confirm==="sr"?"กดอีกครั้งเพื่อยืนยันการรีเซ็ต":"รีเซ็ตรหัสผ่านนักศึกษา"}</button><button class="btn danger" data-sdel="${esc(id)}">${S.confirm==="sdel:"+id?"กดอีกครั้งเพื่อยืนยันการลบ":"ลบนักศึกษา"}</button></div>
    ${S.role!=="teacher"?"":`<h3>วิชาของฉันที่นักเรียนคนนี้เรียน</h3>`+(mine.length?`<div class="list">${mine.map(x=>`<button class="item" data-openstu="${esc(x._id)}" data-id="${esc(id)}"><span class="t"><h3>${esc(x.name)}</h3><span class="note">${esc(x.code)}</span></span><span class="note">ดูเวลาเรียนและคะแนน ›</span></button>`).join("")}</div>`:`<p class="note">นักเรียนคนนี้ไม่ได้อยู่ในห้องที่คุณสอน</p>`)}`}S.gstu=null}
   return `<div><h1>ค้นหานักเรียน</h1><p class="note">ค้นได้จากชื่อ นามสกุล รหัสนักศึกษา หรือรหัสห้อง จากนักเรียนทั้งวิทยาลัย ${S.rooms.reduce((a,r)=>a+r.students.length,0).toLocaleString()} คน</p></div>
   <label class="f search" style="max-width:520px">คำค้น<input type="search" id="gq" value="${esc(S.gq)}" placeholder="เช่น กิตติ หรือ 6921 หรือ ชย.21" autocomplete="off"></label><div class="list" id="gres"></div>`}
@@ -678,7 +743,7 @@ function printStudent(sub){const s=STU.find(x=>x.id===S.stu);if(!s)return;const 
   return saveFile("student-"+s.id,printDoc("ใบรายงานผลการเรียนรายบุคคล",subjMeta(sub).filter(m=>!m.startsWith("ห้อง")),["รายการ","กำหนดส่ง","การส่ง","คะแนน","คะแนนเต็ม"],[...sub.tasks.map(t=>{const x=subOf(t.id,s.id);return [t.t,thaiDate(t.due),sl[x.st],x.score??"-",t.max]}),["คะแนนเก็บ","","",workScore(sub,s.id),sub.weights.work],["สอบกลางภาค","","",S.exams.mid[s.id]??"-",sub.weights.mid],["สอบปลายภาค","","",S.exams.fin[s.id]??"-",sub.weights.final],["รวม / เกรด","","",total(sub,s.id),"เกรด "+grade(sub,s.id)]],false,extra))}
 const fmt=t=>`${pad(Math.floor(t/60))}:${pad(t%60)}`;
 function keep(fn){const y=scrollY;if(fn)fn();render();scrollTo(0,y)}
-function goHome(){S.ssid=null;S.cred=null;S.search=false;S.gstu=null;S.stu=null;S.sid=null;S.task=null;S.form=null;S.confirm=null;render();scrollTo(0,0)}
+function goHome(){S.ssid=null;S.cred=null;S.search=false;S.manage=false;S.mroom=null;S.editStu=null;S.gstu=null;S.stu=null;S.sid=null;S.task=null;S.form=null;S.confirm=null;render();scrollTo(0,0)}
 function csvExport(sub){const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;const ds=sessions();
   const head=["ที่","รหัสประจำตัว","ชื่อ-สกุล","ห้อง","มา","สาย","ลา","ขาด","เวลาเรียน %",...ds.map(d=>thaiDate(d)),...sub.tasks.map(t=>`${t.t} (${t.max})`),`คะแนนเก็บ (${sub.weights.work})`,`กลางภาค (${sub.weights.mid})`,`ปลายภาค (${sub.weights.final})`,"รวม","เกรด"];
   const lines=[[`${sub.code} ${sub.name}`],head,...visible().map((s,i)=>{const a=attStat(s.id);return [i+1,"'"+s.id,s.name,s.room,a.P,a.L,a.E,a.A,a.pct??"",...ds.map(d=>ST[mark(d,s.id)]),...sub.tasks.map(t=>subOf(t.id,s.id).score??""),workScore(sub,s.id),S.exams.mid[s.id]??"",S.exams.fin[s.id]??"",total(sub,s.id),grade(sub,s.id)]})];
@@ -697,7 +762,7 @@ async function xlsxExport(sub){
   const buf=XLSX.write(wb,{type:"array",bookType:"xlsx"});
   dlBlob(`report-${fileCode(sub)}.xlsx`,new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));toast("ส่งออกไฟล์ Excel แล้ว มี 3 แผ่นงาน: สรุปเกรด เช็กชื่อ และคะแนนงาน")}
 /* ---------- เข้าสู่ระบบ / นักศึกษา / ผู้ดูแล ---------- */
-Object.assign(S,{role:null,name:"",kind:"student",pw:null,me:null,sSubjects:[],ssid:null,users:[],cred:null,busy:false,work:{},apiSetup:false});
+Object.assign(S,{role:null,name:"",kind:"student",pw:null,me:null,sSubjects:[],ssid:null,users:[],cred:null,busy:false,work:{},apiSetup:false,manage:false,mroom:null,mq:"",msq:"",editStu:null});
 function hdr(){document.getElementById("who").textContent=S.role?S.name:"";document.getElementById("logout").hidden=!TOKEN;document.getElementById("pw-open").hidden=!S.role;document.querySelector(".shell").classList.toggle("solo",!S.role||!!S.pw)}
 function loginView(){const st=S.kind==="student",inGas=typeof google!=="undefined"&&google.script&&google.script.run,apiUrl=getApiUrl();
   return `<div class="login"><div class="card" style="display:grid;gap:16px;padding:24px"><div style="text-align:center;display:grid;gap:4px;justify-items:center"><span class="seal" style="width:56px;height:56px;font-size:1.5rem">ส</span><h1>ระบบธุรการในชั้นเรียน</h1><p class="note">วิทยาลัยเทคโนโลยีหลวงปู่สรวงวัดไพรพัฒนา</p></div>
@@ -742,8 +807,87 @@ function renderStudent(v,side){const sub=sSubj();
 
 
 /* ผู้ดูแลระบบ */
+function manageView(){
+  const totalStu=S.rooms.reduce((a,r)=>a+r.students.length,0);
+  if(S.mroom){
+    const r=roomById(S.mroom);
+    if(!r){S.mroom=null;return manageView()}
+    const q=S.msq.trim().toLowerCase();
+    const list=r.students.filter(s=>!q||(s[0]+" "+s[1]+" "+s[2]).toLowerCase().includes(q));
+    return `<div style="display:grid;gap:4px"><button class="link" id="mroom-back" style="justify-self:start">← กลับไปรายการห้องเรียนทั้งหมด</button><h1>ห้อง ${esc(r.code)} (${r.students.length} คน)</h1><p class="note">${[r.level,r.major,r.advisor?"ครูที่ปรึกษา "+r.advisor:""].filter(Boolean).map(esc).join(" · ")}</p></div>
+    <form class="card" id="room-edit-form" style="display:grid;gap:12px"><h3>แก้ไขข้อมูลห้องเรียน</h3>
+      <div class="bar">
+        <label class="f" style="flex:1 1 130px">รหัสห้อง<input type="text" id="re-code" value="${esc(r.code)}" required maxlength="40"></label>
+        <label class="f" style="flex:1 1 110px">ระดับชั้น<select id="re-level">${LEVELS.map(lv=>`<option value="${esc(lv)}" ${r.level===lv?"selected":""}>${esc(lv)}</option>`).join("")}<option value="${esc(r.level)}" ${!LEVELS.includes(r.level)&&r.level?"selected":""}>${!LEVELS.includes(r.level)&&r.level?esc(r.level):"อื่นๆ"}</option></select></label>
+        <label class="f" style="flex:2 1 200px">สาขาวิชา<input type="text" id="re-major" value="${esc(r.major)}" placeholder="เช่น ช่างยนต์ หรือ การบัญชี" maxlength="80"></label>
+        <label class="f" style="flex:2 1 220px">ครูที่ปรึกษา<input type="text" id="re-advisor" value="${esc(r.advisor)}" placeholder="เช่น นายสมชาย ใจดี" maxlength="120"></label>
+      </div>
+      <div class="bar acts">
+        <button class="btn primary" type="submit" ${S.busy?"disabled":""}>บันทึกข้อมูลห้อง</button>
+        <button class="btn danger" type="button" data-rdel="${esc(r._id)}">${S.confirm==="rdel:"+r._id?"กดอีกครั้งเพื่อยืนยันการลบห้องนี้และนักศึกษาในห้อง":"ลบห้องเรียนนี้"}</button>
+      </div>
+    </form>
+    <div class="card" style="display:grid;gap:12px">
+      <h3>${S.editStu?"แก้ไขข้อมูลนักศึกษา":"เพิ่มนักศึกษาเข้าห้อง "+esc(r.code)}</h3>
+      <form id="stu-save-form" class="bar">
+        <label class="f" style="flex:1 1 150px">รหัสนักศึกษา<input type="text" id="st-id" value="${esc(S.editStu?S.editStu.id:"")}" placeholder="เช่น 6831012190" required maxlength="20"></label>
+        <label class="f" style="flex:1.5 1 180px">คำนำหน้าและชื่อ<input type="text" id="st-first" value="${esc(S.editStu?S.editStu.first:"")}" placeholder="เช่น นายสมชาย" required maxlength="80"></label>
+        <label class="f" style="flex:1.5 1 180px">นามสกุล<input type="text" id="st-last" value="${esc(S.editStu?S.editStu.last:"")}" placeholder="เช่น ใจดี" maxlength="80"></label>
+        <label class="f" style="flex:1 1 130px">ห้องเรียน<select id="st-rid">${S.rooms.map(rm=>`<option value="${esc(rm._id)}" ${(S.editStu?S.editStu.rid:r._id)===rm._id?"selected":""}>${esc(rm.code)} (${esc(rm.level)})</option>`).join("")}</select></label>
+        <button class="btn primary" type="submit" ${S.busy?"disabled":""}>${S.editStu?"บันทึกการแก้ไข":"+ เพิ่มนักศึกษา"}</button>
+        ${S.editStu?`<button class="btn" type="button" id="stu-edit-cancel">ยกเลิก</button>`:""}
+      </form>
+      <details>
+        <summary style="cursor:pointer;color:var(--brand);font-weight:600;font-size:.9rem">+ เพิ่มนักศึกษาหลายคนพร้อมกัน (วางจาก Excel / พิมพ์ทีละหลายบรรทัด)</summary>
+        <form id="stu-bulk-form" style="display:grid;gap:10px;margin-top:10px">
+          <p class="note">พิมพ์หรือวางข้อมูลบรรทัดละ 1 คน ในรูปแบบ: <b>รหัสนักศึกษา ชื่อ นามสกุล</b> (คั่นด้วยช่องว่างหรือ Tab จาก Excel ได้เลย)</p>
+          <textarea id="st-bulk" rows="5" placeholder="6831012190 นายสมชาย ใจดี
+6831012191 นางสาวสมหญิง รักเรียน"></textarea>
+          <div class="bar acts"><button class="btn primary" type="submit" ${S.busy?"disabled":""}>เพิ่มรายชื่อทั้งหมดเข้าห้อง ${esc(r.code)}</button></div>
+        </form>
+      </details>
+    </div>
+    <div class="bar" style="justify-content:space-between;align-items:end">
+      <h2>รายชื่อนักศึกษาในห้อง ${esc(r.code)} (${r.students.length} คน)</h2>
+      <label class="f search">ค้นหาในห้องนี้<input type="search" id="msq" value="${esc(S.msq)}" placeholder="พิมพ์ชื่อหรือรหัสนักศึกษา" autocomplete="off"></label>
+    </div>
+    ${list.length?`<div class="scroll"><table><thead><tr><th class="num" style="width:50px">ที่</th><th>รหัสนักศึกษา</th><th>ชื่อ-สกุล</th><th>จัดการ</th></tr></thead><tbody>
+      ${list.map((s,i)=>`<tr><td class="num">${i+1}</td><td><b>${esc(s[0])}</b></td><td>${esc(s[1]+" "+s[2])}</td><td><div class="seg">
+        <button type="button" data-sedit="${esc(s[0])}" data-first="${esc(s[1])}" data-last="${esc(s[2])}" data-rid="${esc(r._id)}">แก้ไข / ย้ายห้อง</button>
+        <button type="button" data-sreset="${esc(s[0])}">${S.confirm==="sr:"+s[0]?"กดยืนยันรีเซ็ต":"รีเซ็ตรหัส"}</button>
+        <button type="button" class="btn danger small" data-sdel="${esc(s[0])}">${S.confirm==="sdel:"+s[0]?"กดยืนยันลบ":"ลบ"}</button>
+      </div></td></tr>`).join("")}
+    </tbody></table></div>`:`<div class="empty">ยังไม่มีรายชื่อนักศึกษาในห้องนี้ (หรือไม่พบตามคำค้น) เพิ่มนักศึกษาจากฟอร์มด้านบนได้เลย</div>`}`;
+  }
+  const q=S.mq.trim().toLowerCase();
+  const filtered=S.rooms.filter(r=>!q||(r.code+" "+r.major+" "+r.level+" "+r.advisor).toLowerCase().includes(q));
+  return `<div><h1>จัดการห้องเรียนและนักศึกษา</h1><p class="note">เพิ่ม แก้ไข หรือลบห้องเรียน และเพิ่ม/ลบ/ย้ายห้องนักศึกษาได้ตลอดเวลา · ปัจจุบันมี ${S.rooms.length} ห้อง รวมนักศึกษา ${totalStu.toLocaleString()} คน</p></div>
+  <form class="card" id="room-add-form" style="display:grid;gap:10px"><h3>+ เพิ่มห้องเรียนใหม่</h3>
+    <div class="bar">
+      <label class="f" style="flex:1 1 130px">รหัสห้อง<input type="text" id="ra-code" placeholder="เช่น ชย.11 หรือ สบค.21" required maxlength="40"></label>
+      <label class="f" style="flex:1 1 110px">ระดับชั้น<select id="ra-level">${LEVELS.map(lv=>`<option value="${esc(lv)}">${esc(lv)}</option>`).join("")}</select></label>
+      <label class="f" style="flex:2 1 200px">สาขาวิชา<input type="text" id="ra-major" placeholder="เช่น ช่างยนต์ หรือ เทคโนโลยีสารสนเทศ" maxlength="80"></label>
+      <label class="f" style="flex:2 1 220px">ครูที่ปรึกษา<input type="text" id="ra-advisor" placeholder="เช่น นายสมชาย ใจดี" maxlength="120"></label>
+      <button class="btn primary" type="submit" ${S.busy?"disabled":""}>+ เพิ่มห้องเรียน</button>
+    </div>
+  </form>
+  <div class="card" style="display:grid;gap:10px"><h3>นำเข้ารายชื่อนักศึกษาจากไฟล์ Excel (.xlsx)</h3><p class="note">เลือกไฟล์ใบรายชื่อ Excel (.xlsx) ได้หลายไฟล์พร้อมกัน แต่ละแผ่นงานคือหนึ่งห้อง หรือกดที่ห้องด้านล่างเพื่อเพิ่ม/ลบนักศึกษาทีละคน</p>
+  <div class="bar"><label class="f" style="flex:1 1 260px">ไฟล์ใบรายชื่อ<input type="file" id="roster-files" accept=".xlsx,.xls" multiple></label>${S.rosterPrev?`<button class="btn primary" id="roster-go" ${S.busy?"disabled":""}>${S.busy?"กำลังนำเข้า…":`นำเข้า ${S.rosterPrev.length} ห้อง ${S.rosterPrev.reduce((a,r)=>a+r.students.length,0)} คน`}</button>`:""}</div>
+  ${S.rosterPrev?`<div class="chipsd">${S.rosterPrev.map(r=>`<span class="pill p-mute">${esc(r.code)} (${r.students.length})</span>`).join("")}</div>`:""}</div>
+  <div class="bar" style="justify-content:space-between;align-items:end">
+    <h2>ห้องเรียนทั้งหมด (${filtered.length} ห้อง)</h2>
+    <label class="f search">ค้นหาห้องเรียน<input type="search" id="mq" value="${esc(S.mq)}" placeholder="พิมพ์รหัสห้อง สาขาวิชา ระดับชั้น หรือครูที่ปรึกษา" autocomplete="off"></label>
+  </div>
+  ${filtered.length?`<div class="scroll"><table><thead><tr><th>รหัสห้อง</th><th>ระดับชั้น</th><th>สาขาวิชา</th><th>ครูที่ปรึกษา</th><th class="num">นักศึกษา</th><th>จัดการ</th></tr></thead><tbody>
+    ${filtered.map(r=>`<tr><td><b>${esc(r.code)}</b></td><td><span class="pill p-mute">${esc(r.level||"-")}</span></td><td>${esc(r.major||"-")}</td><td>${esc(r.advisor||"-")}</td><td class="num"><b>${r.students.length}</b> คน</td><td><div class="seg">
+      <button type="button" class="btn primary small" data-mroom="${esc(r._id)}">จัดการนักศึกษา / แก้ไขห้อง</button>
+      <button type="button" class="btn danger small" data-rdel="${esc(r._id)}">${S.confirm==="rdel:"+r._id?"กดยืนยันลบห้อง":"ลบห้อง"}</button>
+    </div></td></tr>`).join("")}
+  </tbody></table></div>`:`<div class="empty">ไม่พบห้องเรียนที่ค้นหา</div>`}`;
+}
 function renderAdmin(v,side){
-  side.innerHTML=`<button data-home="1" ${!S.search?'aria-current="page"':""}>${ICON.home}<span class="tx">จัดการครูผู้สอน</span></button><button data-search="1" ${S.search?'aria-current="page"':""}>${ICON.search}<span class="tx">ค้นหานักศึกษา</span></button>`;
+  side.innerHTML=`<button data-home="1" ${!S.search&&!S.manage?'aria-current="page"':""}>${ICON.home}<span class="tx">จัดการครูผู้สอน</span></button><button data-manage="1" ${S.manage?'aria-current="page"':""}>${ICON.rooms}<span class="tx">จัดการห้อง / นักศึกษา</span></button><button data-search="1" ${S.search?'aria-current="page"':""}>${ICON.search}<span class="tx">ค้นหานักศึกษา</span></button>`;
+  if(S.manage){v.innerHTML=manageView();return}
   if(S.search){v.innerHTML=searchView();if(!S.gstu)fillResults();return}
   const ts=S.users.filter(u=>u.role==="teacher");
   v.innerHTML=`<div><h1>จัดการครูผู้สอน</h1><p class="note">ผู้ดูแลระบบสร้างบัญชีและตั้งรหัสผ่านให้ครู ครูแต่ละคนเห็นเฉพาะรายวิชาและข้อมูลของตัวเอง · มีรายชื่อ ${S.rooms.length} ห้อง ${S.rooms.reduce((a,r)=>a+r.students.length,0).toLocaleString()} คน</p></div>
@@ -765,6 +909,15 @@ function parseRoster(files){return Promise.all([...files].map(f=>f.arrayBuffer()
     const advisor=advM?advM[1].replace(/\s+/g," ").trim():String((rows[3]||[])[0]||"").replace(/^(?:อาจารย์ที่ปรึกษา|ครูที่ปรึกษา)\s*/,"").replace(/\s+/g," ").trim();
     return {code,major:m?m[1].trim():"",level:lv,advisor,students}}).filter(r=>r.students.length)}))).then(a=>a.flat())}
 async function extraClick(b){
+  if(b.dataset.manage){S.manage=true;S.mroom=null;S.editStu=null;S.search=false;S.sid=null;S.form=null;S.stu=null;render();scrollTo(0,0);return true}
+  if(b.dataset.mroom){S.manage=true;S.mroom=b.dataset.mroom;S.editStu=null;S.msq="";S.search=false;S.sid=null;S.form=null;S.stu=null;render();scrollTo(0,0);return true}
+  if(b.id==="mroom-back"){S.mroom=null;S.editStu=null;S.msq="";render();scrollTo(0,0);return true}
+  if(b.dataset.mstuEdit){const id=b.dataset.mstuEdit,rid=b.dataset.rid,r=roomById(rid),st=r&&r.students.find(x=>x[0]===id);if(st){S.manage=true;S.mroom=rid;S.search=false;S.editStu={origId:st[0],id:st[0],first:st[1],last:st[2],rid};render();scrollTo(0,0)}return true}
+  if(b.dataset.sedit){S.editStu={origId:b.dataset.sedit,id:b.dataset.sedit,first:b.dataset.first||"",last:b.dataset.last||"",rid:b.dataset.rid||S.mroom};render();document.getElementById("st-id")?.focus();return true}
+  if(b.id==="stu-edit-cancel"){S.editStu=null;render();return true}
+  if(b.dataset.sreset){const k="sr:"+b.dataset.sreset;if(S.confirm!==k){S.confirm=k;render();return true}S.confirm=null;try{await call("resetStudent",{id:b.dataset.sreset});toast("รีเซ็ตรหัสผ่านนักศึกษาแล้ว")}catch(e){toast(e.message)}render();return true}
+  if(b.dataset.sdel){const id=b.dataset.sdel,k="sdel:"+id;if(S.confirm!==k){S.confirm=k;render();return true}S.confirm=null;try{const d=await call("deleteStudent",{id});S.rooms=d.list.sort((a,x)=>(a.order||0)-(x.order||0));if(S.editStu&&S.editStu.origId===id)S.editStu=null;if(S.gstu&&S.gstu[1]===id)S.gstu=null;toast("ลบนักศึกษาออกจากระบบแล้ว")}catch(e){toast(e.message)}render();return true}
+  if(b.dataset.rdel){const rid=b.dataset.rdel,k="rdel:"+rid;if(S.confirm!==k){S.confirm=k;render();return true}S.confirm=null;try{const d=await call("deleteRoom",{rid});S.rooms=d.list.sort((a,x)=>(a.order||0)-(x.order||0));if(S.mroom===rid)S.mroom=null;toast("ลบห้องเรียนและรายชื่อในห้องแล้ว")}catch(e){toast(e.message)}render();return true}
   if(b.id==="api-edit"){S.apiSetup=true;render();return true}
   if(b.id==="api-cancel"){S.apiSetup=false;render();return true}
   if(b.id==="roster-go"){S.busy=true;render();try{const d=await call("importRoster",{rooms:S.rosterPrev});S.rooms=d.list.sort((a,b)=>(a.order||0)-(b.order||0));S.rosterPrev=null;S.busy=false;toast(`นำเข้าแล้ว ${d.rooms} ห้อง ${d.students} คน`)}catch(e){S.busy=false;toast(e.message)}render();return true}
@@ -780,6 +933,49 @@ async function extraClick(b){
   return false}
 const fileB64=f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(",")[1]||"");r.onerror=rej;r.readAsDataURL(f)});
 async function extraSubmit(form){
+  if(form.id==="room-add-form"){
+    if(S.busy)return true;
+    const code=document.getElementById("ra-code").value.trim(),level=document.getElementById("ra-level").value.trim(),major=document.getElementById("ra-major").value.trim(),advisor=document.getElementById("ra-advisor").value.trim();
+    if(!code){toast("กรอกรหัสห้องเรียนก่อน");return true}
+    S.busy=true;render();
+    try{const d=await call("saveRoom",{code,level,major,advisor});S.rooms=d.list.sort((a,b)=>(a.order||0)-(b.order||0));S.busy=false;S.mroom=d.rid;toast("เพิ่มห้องเรียน "+code+" แล้ว สามารถเพิ่มรายชื่อนักศึกษาได้เลย")}catch(e){S.busy=false;toast(e.message)}
+    render();return true;
+  }
+  if(form.id==="room-edit-form"){
+    if(S.busy)return true;
+    const code=document.getElementById("re-code").value.trim(),level=document.getElementById("re-level").value.trim(),major=document.getElementById("re-major").value.trim(),advisor=document.getElementById("re-advisor").value.trim();
+    if(!code){toast("กรอกรหัสห้องเรียนก่อน");return true}
+    S.busy=true;render();
+    try{const d=await call("saveRoom",{rid:S.mroom,code,level,major,advisor});S.rooms=d.list.sort((a,b)=>(a.order||0)-(b.order||0));S.busy=false;toast("บันทึกข้อมูลห้องเรียนแล้ว")}catch(e){S.busy=false;toast(e.message)}
+    render();return true;
+  }
+  if(form.id==="stu-save-form"){
+    if(S.busy)return true;
+    const id=document.getElementById("st-id").value.trim(),first=document.getElementById("st-first").value.trim(),last=document.getElementById("st-last").value.trim(),rid=document.getElementById("st-rid").value;
+    if(!id||!first){toast("กรอกรหัสนักศึกษาและชื่อให้ครบ");return true}
+    const isEdit=!!S.editStu;
+    S.busy=true;render();
+    try{const d=await call("saveStudent",{origId:isEdit?S.editStu.origId:"",id,first,last,rid});S.rooms=d.list.sort((a,b)=>(a.order||0)-(b.order||0));S.editStu=null;S.busy=false;toast(isEdit?"บันทึกการแก้ไขข้อมูลนักศึกษาแล้ว":"เพิ่มนักศึกษาเข้าห้องแล้ว")}catch(e){S.busy=false;toast(e.message)}
+    render();return true;
+  }
+  if(form.id==="stu-bulk-form"){
+    if(S.busy)return true;
+    const raw=(document.getElementById("st-bulk")?.value||"").trim();
+    if(!raw){toast("วางหรือพิมพ์รายชื่อนักศึกษาก่อน");return true}
+    const students=raw.split(/\r?\n/).map(line=>line.trim()).filter(Boolean).map(line=>{
+      const parts=line.split(/[\t,]+|\s+/).map(x=>x.trim()).filter(Boolean);
+      const idIdx=parts.findIndex(p=>/^\d{5,15}$/.test(p));
+      if(idIdx>=0){
+        const id=parts[idIdx],rest=parts.slice(idIdx+1);
+        return [id,rest[0]||"",rest.slice(1).join(" ")||""];
+      }
+      return [parts[0]||"",parts[1]||"",parts.slice(2).join(" ")||""];
+    }).filter(x=>x[0]&&x[1]);
+    if(!students.length){toast("ไม่พบรหัสนักศึกษาและชื่อในข้อความที่วาง");return true}
+    S.busy=true;render();
+    try{const d=await call("bulkAddStudents",{rid:S.mroom,students});S.rooms=d.list.sort((a,b)=>(a.order||0)-(b.order||0));S.busy=false;toast(`เพิ่มนักศึกษาใหม่ ${d.added} คน${d.updated?" (อัปเดต "+d.updated+" คน)":""}`)}catch(e){S.busy=false;toast(e.message)}
+    render();return true;
+  }
   if(form.id==="api-form"){const u=document.getElementById("api-url").value.trim();try{localStorage.setItem("ca_api_url",u)}catch(e){}S.apiSetup=false;toast("บันทึกลิงก์เซิร์ฟเวอร์แล้ว");render();return true}
   if(form.id==="login-form"){if(S.busy)return true;const user=document.getElementById("l-user").value.trim(),pass=document.getElementById("l-pass").value;S.busy=true;render();
     try{const d=await call("login",{kind:S.kind,user,pass});TOKEN=d.token;try{localStorage.setItem("ca_token",TOKEN)}catch(e){}S.busy=false;if(d.mustChange){S.pw={force:true,old:pass};render()}else await loadBoot()}catch(e){S.busy=false;render();const u=document.getElementById("l-user");if(u)u.value=user;toast(e.message)}return true}
@@ -796,18 +992,18 @@ async function extraSubmit(form){
 /* ---------- events ---------- */
 document.addEventListener("click",async e=>{
   const b=e.target.closest("button");if(!b)return;const sub=subj();
-  if(b.id!=="subj-del"&&b.id!=="task-del"&&b.id!=="stu-reset"&&!b.dataset.udel)S.confirm=null;
+  if(b.id!=="subj-del"&&b.id!=="task-del"&&b.id!=="stu-reset"&&!b.dataset.udel&&!b.dataset.rdel&&!b.dataset.sdel&&!b.dataset.sreset)S.confirm=null;
   if(await extraClick(b))return;
-  if(S.role!=="teacher"){if(b.id==="go-home"||b.dataset.home){goHome()}else if(b.dataset.search){S.search=true;S.gstu=null;render();scrollTo(0,0)}else if(b.dataset.gstu){S.gstu=[b.dataset.gstu,b.dataset.id];render();scrollTo(0,0)}else if(b.id==="gstu-back"){S.gstu=null;render()}return}
+  if(S.role!=="teacher"){if(b.id==="go-home"||b.dataset.home){goHome()}else if(b.dataset.search){S.manage=false;S.search=true;S.gstu=null;render();scrollTo(0,0)}else if(b.dataset.gstu){S.gstu=[b.dataset.gstu,b.dataset.id];render();scrollTo(0,0)}else if(b.id==="gstu-back"){S.gstu=null;render()}return}
   if(b.id==="go-home"||b.id==="back"||b.dataset.home){goHome();return}
-  if(b.dataset.search){S.sid=null;S.form=null;S.stu=null;S.search=true;S.gstu=null;render();scrollTo(0,0);const g=document.getElementById("gq");if(g)g.focus();return}
+  if(b.dataset.search){S.sid=null;S.form=null;S.stu=null;S.manage=false;S.search=true;S.gstu=null;render();scrollTo(0,0);const g=document.getElementById("gq");if(g)g.focus();return}
   if(b.dataset.gstu){S.gstu=[b.dataset.gstu,b.dataset.id];render();scrollTo(0,0);return}
   if(b.id==="gstu-back"){S.gstu=null;render();return}
   if(b.dataset.openstu){openSubject(b.dataset.openstu,b.dataset.id);return}
   if(b.dataset.addroom){S.form.rooms.push(b.dataset.addroom);const q=document.getElementById("rq");q.value="";fillRooms();q.focus();return}
   if(b.dataset.rmroom){S.form.rooms=S.form.rooms.filter(x=>x!==b.dataset.rmroom);fillRooms();return}
-  if(b.dataset.newsubj){S.search=false;S.sid=null;S.form={id:null,name:"",code:"",sched:"",rooms:[]};render();scrollTo(0,0);return}
-  if(b.dataset.subj){openSubject(b.dataset.subj);return}
+  if(b.dataset.newsubj){S.search=false;S.manage=false;S.sid=null;S.form={id:null,name:"",code:"",sched:"",rooms:[]};render();scrollTo(0,0);return}
+  if(b.dataset.subj){S.manage=false;openSubject(b.dataset.subj);return}
   if(b.id==="form-cancel"){const id=S.form.id;S.form=null;if(id){S.sid=id;render()}else goHome();return}
   if(b.id==="subj-edit"){S.form={id:sub._id,name:sub.name,code:sub.code,sched:sub.sched,rooms:[...sub.rooms]};render();scrollTo(0,0);return}
   if(b.id==="subj-del"){if(S.confirm!=="subj"){S.confirm="subj";Object.assign(S.form,{name:document.getElementById("f-name").value,code:document.getElementById("f-code").value,sched:document.getElementById("f-sched").value});keep();return}
@@ -842,6 +1038,8 @@ document.addEventListener("click",async e=>{
 document.addEventListener("input",e=>{const t=e.target,sub=subj();
   if(t.id==="rq"){fillRooms();return}
   if(t.id==="gq"){S.gq=t.value;fillResults();return}
+  if(t.id==="mq"){S.mq=t.value;const pos=t.selectionStart;render();const el=document.getElementById("mq");if(el){el.focus();el.setSelectionRange(pos,pos)}return}
+  if(t.id==="msq"){S.msq=t.value;const pos=t.selectionStart;render();const el=document.getElementById("msq");if(el){el.focus();el.setSelectionRange(pos,pos)}return}
   if(t.id==="q"){S.q=t.value;const q=S.q.trim().toLowerCase();document.querySelectorAll("tr[data-k]").forEach(tr=>tr.hidden=!!q&&!tr.dataset.k.includes(q));return}
   if(!sub)return;
   const num=(v,max)=>{if(v===""||v==null)return null;const lim=max!=null&&max!==""?+max:1e9;return Math.min(isNaN(lim)?1e9:lim,Math.max(0,+v||0))};
